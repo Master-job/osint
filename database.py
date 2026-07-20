@@ -1,14 +1,13 @@
 import sqlite3
 
-# Название файла, где хранится вся база данных
 DB_NAME = "reputation_base.db"
 
 def init_db():
-    """Создает таблицы в базе данных, если их еще нет."""
+    """Создает таблицы базы данных при старте приложения."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # 1. Таблица для карточек (Белый / Чёрный список)
+    # Таблица карточек списков
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS reputation_cards (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,7 +20,7 @@ def init_db():
     );
     """)
     
-    # 2. Таблица для комментариев под карточками
+    # Таблица отзывов / комментариев
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS comments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +35,7 @@ def init_db():
     conn.close()
 
 def get_card(target_id: int):
-    """Ищет карточку пользователя по его Telegram ID."""
+    """Ищет запись в базе по Telegram ID."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
@@ -48,7 +47,7 @@ def get_card(target_id: int):
     return card
 
 def get_comments(target_id: int, limit: int = 5):
-    """Достает последние комментарии к карточке."""
+    """Получает список последних отзывов."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
@@ -60,7 +59,7 @@ def get_comments(target_id: int, limit: int = 5):
     return comments
 
 def add_comment(target_id: int, author_id: int, text: str):
-    """Сохраняет новый комментарий."""
+    """Сохраняет комментарий."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
@@ -71,7 +70,7 @@ def add_comment(target_id: int, author_id: int, text: str):
     conn.close()
 
 def add_or_update_card(target_id: int, username: str, status: str, description: str, admin_id: int):
-    """Добавляет пользователя в белый/черный список или обновляет статус."""
+    """Добавляет пользователя в базы списков репутации."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(

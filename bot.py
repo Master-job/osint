@@ -1,11 +1,12 @@
 import asyncio
-import os
 import logging
+import os
 from aiohttp import web
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 
-# Импортируем ваши модули
 import database
 import reputation
 
@@ -13,9 +14,15 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# 1. Функция для "обмана" Render (слушает веб-порт)
+if not BOT_TOKEN:
+    raise ValueError("ОШИБКА: Задайте переменную окружения BOT_TOKEN!")
+
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher()
+
+# --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 async def handle_ping(request):
-    return web.Response(text="Bot is live!")
+    return web.Response(text="Bot is active!")
 
 async def start_web_server():
     app = web.Application()
@@ -23,27 +30,25 @@ async def start_web_server():
     runner = web.AppRunner(app)
     await runner.setup()
     
-    # Render сам передает переменную PORT (по умолчанию 10000)
     port = int(os.getenv("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     logging.info(f"Веб-сервер запущен на порту {port}")
 
+# --- ГЛАВНАЯ ТОЧКА ВХОДА ---
 async def main():
     logging.basicConfig(level=logging.INFO)
     
-    # Инициализация базы данных
+    # 1. Запуск базы данных
     database.init_db()
-
-    bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher()
-
-    # Подключаем роутер
+    
+    # 2. Подключение роутера с хэндлерами
     dp.include_router(reputation.router)
-
+    
+    # 3. Очистка старых сообщений
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Запускаем БОТА и ВЕБ-СЕРВЕР одновременно
+    # 4. Одновременный запуск веб-сервера и бота
     await asyncio.gather(
         dp.start_polling(bot),
         start_web_server()
