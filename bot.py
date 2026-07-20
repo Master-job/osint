@@ -1,80 +1,63 @@
-
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
-from config import TOKEN
+import os
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from dotenv import load_dotenv
 
-# Включаем логирование, чтобы видеть ошибки в терминале
-logging.basicConfig(level=logging.INFO)
+# Загружаем переменные из .env файла (не забудь создать его и добавить BOT_TOKEN=твой_токен)
+load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-bot = Bot(token=TOKEN)
+# Инициализация бота и диспетчера
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-@dp.message(F.text == "/start")
-async def start_cmd(message: Message):
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
     await message.answer(
-        "👋 Привет! Я OSINT-бот.\n\n"
-        "Перешли мне **любое сообщение мошенника**, и я попробую вытащить всю информацию о его аккаунте."
+        "Привет! Я антифрод-бот. Перешли мне сообщение от пользователя, "
+        "и я попробую достать его данные для проверки."
     )
 
-@dp.message()
-async def analyze_forwarded_message(message: Message):
-    # Проверяем, является ли сообщение пересланным
-    if not message.forward_origin:
-        await message.answer("⚠️ Пожалуйста, именно **перешли** мне сообщение мошенника, а не скопируй его текст.")
-        return
-
+# Хэндлер, который ловит только пересланные сообщения
+@dp.message(F.forward_origin)
+async def handle_forwarded_message(message: types.Message):
     origin = message.forward_origin
-    user_id = None
-    name = "Скрыто"
-    username = "Отсутствует"
-
-    # Обработка разных типов пересылки (от пользователя, скрытого аккаунта, канала, чата)
-    if origin.type == "user":
-        user = origin.sender_user
-        user_id = user.id
-        name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-        username = f"@{user.username}" if user.username else "Отсутствует"
     
-    elif origin.type == "hidden_user":
-        name = origin.sender_user_name
-        await message.answer(
-            f"❌ **Аккаунт скрыт настройками приватности!**\n"
-            f"Имя в профиле: `{name}`\n\n"
-            f"Прямой Telegram ID извлечь невозможно. Попробуй отправить мне его `@username` текстовым сообщением."
-        )
-        return
+    # Проверяем, от кого переслано (если это обычный пользователь)
+    if origin.type == 'user':
+        user_id = origin.sender_user.id
+        first_name = origin.sender_user.first_name
+        last_name = origin.sender_user.last_name or ""
+        username = f"@{origin.sender_user.username}" if origin.sender_user.username else "Нет юзернейма"
         
-    elif origin.type == "channel":
-        await message.answer("📢 Это сообщение переслано из канала, а не от пользователя.")
-        return
-    elif origin.type == "chat":
-        await message.answer("👥 Это сообщение переслано из супергруппы/чата.")
-        return
+        response = (
+            f"🔍 <b>Данные из пересланного сообщения:</b>\n"
+            f"ID: <code>{user_id}</code>\n"
+            f"Имя: {first_name} {last_name}\n"
+            f"Username: {username}"
+        )
+    # Если профиль скрыт настройками приватности
+    elif origin.type == 'hidden_user':
+        response = (
+            "⚠️ <b>Профиль скрыт</b>\n"
+            f"Имя: {origin.sender_user_name}\n"
+            "Пользователь запретил ссылаться на свой аккаунт при пересылке. "
+            "Извлечь ID невозможно."
+        )
+    else:
+        response = "Это сообщение переслано не от обычного пользователя (возможно, от канала или бота)."
 
-    # Если ID успешно найден, выводим первичный отчет
-    if user_id:
-        report = (
-            f"🔍 **РЕЗУЛЬТАТ ПЕРВИЧНОГО АНАЛИЗА:**\n\n"
-            f"🆔 **Telegram ID:** `{user_id}`\n"
-            f"👤 **Имя:** {name}\n"
-            f"🔗 **Никнейм:** {username}\n"
-            f" Ссылка: tg://user?id={user_id}\n\n"
-            f"⏳ *Запускаю поиск по базам данных и чатам...*"
-        )
-        
-        # Проверяем наличие фото профиля
-        photos = await bot.get_user_profile_photos(user_id=user_id, limit=1)
-        if photos.total_count > 0:
-            # Отправляем отчет вместе с последней аватаркой
-            photo_id = photos.photos[0][-1].file_id
-            await message.reply_photo(photo=photo_id, caption=report, parse_mode="Markdown")
-        else:
-            await message.reply(text=report, parse_mode="Markdown")
+    await message.reply(response)
 
 async def main():
-    print("Бот успешно запущен и готов к работе!")
+    logging.basicConfig(level=logging.INFO)
+    print("Бот запущен...")
+    # Пропускаем старые апдейты и запускаем поллинг
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
