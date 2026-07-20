@@ -1,3 +1,4 @@
+import urllib.parse
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -11,7 +12,26 @@ router = Router()
 class ReviewState(StatesGroup):
     waiting_for_comment = State()
 
-# --- Вспомогательная функция сборки ответа ---
+def generate_osint_data(target_id: int, username: str = None):
+    """Генерирует ссылки для проверки по внешним базам и открытым источникам."""
+    clean_username = username.lstrip('@') if username else None
+    str_id = str(target_id)
+    
+    links = []
+    
+    # 1. Проверка по Telegram ID в базах и поисковиках
+    id_google = urllib.parse.quote(f'"{str_id}" site:t.me OR site:tgstat.ru')
+    links.append(InlineKeyboardButton(text="🔍 Google (Поиск ID в TG)", url=f"https://www.google.com/search?q={id_google}"))
+    links.append(InlineKeyboardButton(text="📊 TGStat (Поиск ID)", url=f"https://tgstat.ru/search?q={str_id}"))
+
+    # 2. Если есть Юзернейм — добавляем проверки по нему
+    if clean_username:
+        username_google = urllib.parse.quote(f'"{clean_username}" -site:t.me')
+        links.append(InlineKeyboardButton(text="🌐 Упоминания вне TG", url=f"https://www.google.com/search?q={username_google}"))
+        links.append(InlineKeyboardButton(text="📈 Telemetr Аналитика", url=f"https://telemetr.me/channels/?q={clean_username}"))
+
+    return links
+
 def build_reputation_response(target_id: int, username: str = None, first_name: str = "", last_name: str = ""):
     card = database.get_card(target_id)
     
@@ -19,25 +39,25 @@ def build_reputation_response(target_id: int, username: str = None, first_name: 
     full_name = f"{first_name} {last_name}".strip()
     
     if not card:
-        status_text = "🟢 **В базе репутации не найден (Чисто).**"
+        status_text = "🟢 <b>В локальной базе не найден</b>"
         description = "Записи отсутствуют."
     else:
         status, description, _ = card
         if status == "blacklist":
-            status_text = "🔴 **ВНИМАНИЕ! ЧЁРНЫЙ СПИСОК (Недобросовестный)**"
+            status_text = "🔴 <b>ВНИМАНИЕ! ЧЁРНЫЙ СПИСОК</b>"
         else:
-            status_text = "🟢 **БЕЛЫЙ СПИСОК (Проверенный / Надежный)**"
+            status_text = "🟢 <b>БЕЛЫЙ СПИСОК (Проверенный)</b>"
 
     comments = database.get_comments(target_id)
 
     text = (
-        f"🔍 <b>Информация о пользователе:</b>\n"
+        f"🔍 <b>СВОДКА РЕПУТАЦИИ И OSINT-ПРОВЕРКИ</b>\n\n"
         f"👤 <b>Имя:</b> {full_name or 'Не указано'}\n"
         f"🆔 <b>ID:</b> <code>{target_id}</code>\n"
         f"🏷 <b>Username:</b> {user_ref}\n\n"
-        f"<b>Статус проверки:</b>\n{status_text}\n"
+        f"<b>Статус локальной базы:</b>\n{status_text}\n"
         f"<b>Примечание:</b> {description}\n\n"
-        f"💬 <b>Отзывы и комментарии:</b>\n"
+        f"💬 <b>Отзывы в системе:</b>\n"
     )
     
     if comments:
@@ -47,22 +67,30 @@ def build_reputation_response(target_id: int, username: str = None, first_name: 
     else:
         text += "<i>Комментариев пока нет.</i>\n"
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Оставить отзыв", callback_data=f"add_comment:{target_id}")]
-    ])
+    # Собираем кнопки
+    keyboard_buttons = []
+    
+    # Кнопка добавления отзыва
+    keyboard_buttons.append([InlineKeyboardButton(text="💬 Оставить отзыв", callback_data=f"add_comment:{target_id}")])
+    
+    # Кнопки OSINT-проверок
+    osint_buttons = generate_osint_data(target_id, username)
+    for btn in osint_buttons:
+        keyboard_buttons.append([btn])
+
+    kb = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
     return text, kb
 
-# --- Команда /start ---
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
-        "👋 <b>Бот проверки репутации запущен!</b>\n\n"
-        "• Перешли сообщение от пользователя, чтобы проверить его.\n"
+        "👋 <b>Антифрод & OSINT бот запущен!</b>\n\n"
+        "• Перешли сообщение от пользователя, чтобы "
+        "проверить его по внутренним и внешним базам.\n"
         "• Или отправь команду: <code>/check ID_пользователя</code>"
     )
 
-# --- Команда /check ---
 @router.message(Command("check"))
 async def check_user_cmd(message: types.Message):
     args = message.text.split(maxsplit=1)
@@ -74,7 +102,6 @@ async def check_user_cmd(message: types.Message):
     text, kb = build_reputation_response(target_id)
     await message.answer(text, reply_markup=kb)
 
-# --- Обработка ПЕРЕСЛАННЫХ сообщений ---
 @router.message(F.forward_origin)
 async def handle_forwarded_message(message: types.Message):
     origin = message.forward_origin
@@ -92,22 +119,20 @@ async def handle_forwarded_message(message: types.Message):
         await message.answer(
             f"⚠️ <b>Профиль скрыт настройками приватности!</b>\n"
             f"Имя: {origin.sender_user_name}\n"
-            f"Узнать ID скрытого пользователя напрямую невозможно."
+            f"Узнать ID скрытого аккаунта напрямую невозможно."
         )
     else:
         await message.answer("Сообщение переслано из канала или бота.")
 
-# --- Добавление комментария по кнопке ---
 @router.callback_query(F.data.startswith("add_comment:"))
 async def start_add_comment(callback: types.CallbackQuery, state: FSMContext):
     target_id = int(callback.data.split(":")[1])
     await state.update_data(target_id=target_id)
     await state.set_state(ReviewState.waiting_for_comment)
     
-    await callback.message.answer("Напишите ваш отзыв или комментарий об этом пользователе:")
+    await callback.message.answer("Напишите ваш отзыв или комментарий о пользователе:")
     await callback.answer()
 
-# --- Сохранение отзыва ---
 @router.message(ReviewState.waiting_for_comment)
 async def save_comment(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -121,11 +146,10 @@ async def save_comment(message: types.Message, state: FSMContext):
     )
 
     await state.clear()
-    await message.answer("✅ Ваш отзыв успешно сохранен под карточкой пользователя!")
+    await message.answer("✅ Отзыв сохранен!")
 
-# --- Ловушка для всех остальных текстовых сообщений ---
 @router.message(F.text)
 async def fallback_handler(message: types.Message):
     await message.answer(
-        "Перешли мне любое сообщение от пользователя или напиши команду <code>/check ID</code>"
+        "Перешли сообщение от пользователя или напиши команду <code>/check ID</code>"
     )
