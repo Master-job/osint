@@ -1,28 +1,32 @@
+import os
 import asyncio
 from aiogram import Bot, Dispatcher
+from dotenv import load_dotenv
 
-# Импортируем наш роутер и функцию инициализации БД из соседних файлов
+# Подгружаем переменные из файла .env (если работаем локально)
+load_dotenv()
+
+# Достаем токен из окружения
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+if not BOT_TOKEN:
+    raise ValueError("❌ Ошибка: Переменная BOT_TOKEN не найдена в окружении (.env)!")
+
 import database
 import reputation
 
-# ⚠️ ВСТАВЬТЕ СЮДА ВАШ ТОКЕН БОТА ИЗ @BotFather
-BOT_TOKEN = "ВАШ_ТОКЕН_БОТА"
-
 async def main():
-    # 1. При старте бота сразу создаем таблицы в базе данных (если их нет)
+    # Инициализируем БД
     database.init_db()
-    print("База данных успешно подключена!")
+    print("База данных готова!")
 
-    # 2. Инициализируем бота и диспетчер
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
-    # 3. Подключаем наш модуль репутации
+    # Подключаем роутер списков
     dp.include_router(reputation.router)
 
-    print("Бот запущен и готов к работе!")
-    
-    # Удаляем старые необработанные сообщения и запускаем бота
+    print("Бот успешно запущен!")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
